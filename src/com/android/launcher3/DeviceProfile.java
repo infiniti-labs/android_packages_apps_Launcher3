@@ -290,7 +290,8 @@ public class DeviceProfile {
                                 R.dimen.workspace_page_indicator_height
                         ),
                         /*responsiveWorkspaceCellSpec*/ mResponsiveWorkspaceCellSpec,
-                        qsbHeight
+                        qsbHeight,
+                        showQsb
                 );
 
         int allAppsTopPadding = mDeviceProperties.getInsets().top;

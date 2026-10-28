@@ -91,8 +91,9 @@ data class HotseatProfileInitialValues(
             workspacePageIndicatorHeight: Int,
             responsiveWorkspaceCellSpec: CalculatedCellSpec?,
             qsbHeight: Int,
+            showQsb: Boolean,
         ): HotseatProfileInitialValues {
-            return when {
+            val values = when {
                 responsiveHotseatSpec != null && responsiveWorkspaceCellSpec != null ->
                     createResponsiveHotseatProfileInitialValues(
                         deviceProperties = deviceProperties,
@@ -118,6 +119,13 @@ data class HotseatProfileInitialValues(
                         qsbHeight = qsbHeight,
                     )
             }
+            if (showQsb || values.isQsbInline || isVerticalBarLayout) return values
+            // A hidden QSB below the hotseat must not keep its space reserved.
+            return values.copy(
+                qsbSpace = 0,
+                qsbVisualHeight = 0,
+                barSizePx = values.barSizePx - values.qsbSpace - values.qsbVisualHeight,
+            )
         }
 
         fun createResponsiveHotseatProfileInitialValues(
