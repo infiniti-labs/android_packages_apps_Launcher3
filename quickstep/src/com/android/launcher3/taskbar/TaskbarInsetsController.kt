@@ -15,6 +15,7 @@
  */
 package com.android.launcher3.taskbar
 
+import android.database.ContentObserver
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Insets
@@ -23,6 +24,7 @@ import android.graphics.Rect
 import android.graphics.Region
 import android.os.Binder
 import android.os.IBinder
+import android.provider.Settings
 import android.view.DisplayInfo
 import android.view.Gravity
 import android.view.InsetsFrameProvider
@@ -76,6 +78,9 @@ class TaskbarInsetsController(val context: TaskbarActivityContext) : LoggableTas
         private const val INDEX_LEFT = 0
         private const val INDEX_RIGHT = 1
         private const val TAG = "TaskbarInsetsController"
+        private const val NAVIGATION_HANDLE_HIDDEN = "navigation_handle_hidden"
+        // Apps like the wallpaper picker ignore insets while a visible navigation bar reports 0.
+        private const val HIDDEN_NAVIGATION_HANDLE_HEIGHT = 1
 
         private fun Region.addBoundsToRegion(bounds: Rect?) {
             bounds?.let { op(it, Region.Op.UNION) }
@@ -95,6 +100,14 @@ class TaskbarInsetsController(val context: TaskbarActivityContext) : LoggableTas
             context,
             this::onTaskbarOrBubblebarWindowHeightOrInsetsChanged,
         )
+    private var navigationHandleHidden = false
+    private val navigationHandleHiddenObserver =
+        object : ContentObserver(context.mainThreadHandler) {
+            override fun onChange(selfChange: Boolean) {
+                navigationHandleHidden = readNavigationHandleHidden()
+                onTaskbarOrBubblebarWindowHeightOrInsetsChanged()
+            }
+        }
     @VisibleForTesting val debugTouchableRegion = DebugTouchableRegion()
 
     // Initialized in init.
@@ -104,6 +117,12 @@ class TaskbarInsetsController(val context: TaskbarActivityContext) : LoggableTas
     fun init(controllers: TaskbarControllers) {
         this.controllers = controllers
         windowLayoutParams = context.windowLayoutParams
+        navigationHandleHidden = readNavigationHandleHidden()
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor(NAVIGATION_HANDLE_HIDDEN),
+            false,
+            navigationHandleHiddenObserver,
+        )
         onTaskbarOrBubblebarWindowHeightOrInsetsChanged()
 
         context.addOnDeviceProfileChangeListener(deviceProfileChangeListener)
@@ -113,7 +132,11 @@ class TaskbarInsetsController(val context: TaskbarActivityContext) : LoggableTas
     fun onDestroy() {
         context.removeOnDeviceProfileChangeListener(deviceProfileChangeListener)
         gestureNavSettingsObserver.unregister()
+        context.contentResolver.unregisterContentObserver(navigationHandleHiddenObserver)
     }
+
+    private fun readNavigationHandleHidden() =
+        Settings.Secure.getInt(context.contentResolver, NAVIGATION_HANDLE_HIDDEN, 0) == 1
 
     fun onTaskbarOrBubblebarWindowHeightOrInsetsChanged() =
         traceSection("$TAG.onTaskbarOrBubblebarWindowHeightOrInsetsChanged") {
@@ -250,8 +273,17 @@ class TaskbarInsetsController(val context: TaskbarActivityContext) : LoggableTas
         val contentHeight = controllers.taskbarStashController.contentHeightToReportToApps
         val tappableHeight = controllers.taskbarStashController.tappableHeightToReportToApps
         val res = context.resources
+        val isPinnedTaskbar =
+            context.deviceProfile.deviceProperties.taskbarConfiguration.isTaskbarPresent &&
+                !context.isTransientTaskbar
         if (provider.type == navigationBars()) {
-            provider.insetsSize = getInsetsForGravityWithCutout(contentHeight, gravity, endRotation)
+            // Gestures keep the mandatory system gesture inset below.
+            val reportedHeight =
+                if (navigationHandleHidden && !context.isThreeButtonNav && !isPinnedTaskbar) {
+                    HIDDEN_NAVIGATION_HANDLE_HEIGHT
+                } else contentHeight
+            provider.insetsSize =
+                getInsetsForGravityWithCutout(reportedHeight, gravity, endRotation)
         } else if (provider.type == mandatorySystemGestures()) {
             if (context.isThreeButtonNav) {
                 provider.insetsSize =
@@ -262,9 +294,6 @@ class TaskbarInsetsController(val context: TaskbarActivityContext) : LoggableTas
                         ResourceUtils.NAVBAR_BOTTOM_GESTURE_SIZE,
                         context.resources,
                     )
-                val isPinnedTaskbar =
-                    context.deviceProfile.deviceProperties.taskbarConfiguration.isTaskbarPresent &&
-                        !context.isTransientTaskbar
                 val mandatoryGestureHeight = if (isPinnedTaskbar) contentHeight else gestureHeight
                 provider.insetsSize =
                     getInsetsForGravityWithCutout(mandatoryGestureHeight, gravity, endRotation)
