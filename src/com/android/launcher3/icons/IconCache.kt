@@ -498,6 +498,7 @@ constructor(
         Trace.beginSection("loadIconSubsectionWithFallback")
 
         val tasksList = ArrayList<TaskSchedule.SafelyRunnable>()
+        val fallbackResults = ArrayList<Runnable>()
         // Fallback title and icon loading
         duplicateIconRequestsMap.forEach { (cn, iconRequestInfos) ->
             val iconRequestInfo = iconRequestInfos[0]
@@ -521,10 +522,10 @@ constructor(
                 entry.bitmap = icon
                 entry.contentDescription = itemInfo.contentDescription ?: ""
 
-                tasksList.add(
-                    object : TaskSchedule.SafelyRunnable() {
-                        override fun onTaskRun() {
-                            if (loadFallbackIcon) {
+                if (loadFallbackIcon) {
+                    tasksList.add(
+                        object : TaskSchedule.SafelyRunnable() {
+                            override fun onTaskRun() {
                                 loadFallbackIcon(
                                     lai,
                                     entry,
@@ -535,26 +536,23 @@ constructor(
                                     sectionKey.user,
                                 )
                             }
-                            if (loadFallbackTitle && TextUtils.isEmpty(entry.title) && lai != null) {
-                                loadFallbackTitle(
-                                    lai,
-                                    entry,
-                                    LauncherActivityCachingLogic,
-                                    sectionKey.user,
-                                )
-                            }
-                            iconRequestInfos.forEach { applyCacheEntry(entry, it.itemInfo) }
                         }
+                    )
+                }
+                fallbackResults.add {
+                    if (loadFallbackTitle && TextUtils.isEmpty(entry.title) && lai != null) {
+                        loadFallbackTitle(lai, entry, LauncherActivityCachingLogic, sectionKey.user)
                     }
-                )
+                    iconRequestInfos.forEach { applyCacheEntry(entry, it.itemInfo) }
+                }
             }
         }
         TaskSchedule.runTasks(
             tasksList,
             Executors.THREAD_POOL_EXECUTOR,
             Math.max(Runtime.getRuntime().availableProcessors() / 2, 2),
-            2000,
         )
+        fallbackResults.forEach { it.run() }
         Trace.endSection()
     }
 
